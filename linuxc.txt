@@ -1,0 +1,940 @@
+内核版本：运行程序，管理磁盘和打印机等硬件设备的核心程序。
+        内核分为稳定版本和开发版本
+
+发行版本：包含桌面环境，办公套件，媒体播放器，数据库等应用软件
+
+目录:一组相关文件的集合
+文件：存放数据
+路径：到达文件定位的目录里
+
+
+查看文件的格式  file filename
+
+
+linux 根目录介绍
+/bin [usr/bin] :存放二进制文件的目录(普通用户可以执行)
+/sbin [usr/sbin] 存放二进制文件的目录(root 用户才可以执行)
+/boot   系统启动时用到的一些文件
+/dev 存放linux下设备文件，访问该目录下的某个文件，就相当于访问某个设备
+/etc 存放系统配置文件
+/home 系统默认的用户家目录(普通用户的家目录)
+/lib [/usr/lib , usr/local/lib] 系统使用函数库的目录，(usr/local/lib 用户编译 make  install 时安装的目录)
+/lost+fount 系统产生的错误会在这里存放
+/media [/mmt] 光盘默认挂载点
+/opt 系统而外安装的软件
+
+
+
+一、IO文件
+文件描述符： STDIN_FILENO(in), STDOUT_FILENO(out), STDERR_FILENO(err)
+对文件进行读写时， 读写数据的大小应该在  4096byte
+
+常用的函数  open()， close()， read()， write()， lseek() 
+对文件进行操作时，考虑文件共享问题，使用原子操作，  O_APPEND(每次在写之前都lseek到末尾)，pread(), pwrite()
+文件描述符的复制    dup(), dup2()  这种复制只是描述符增加，文件表不增加
+在操作文件数据时，内核会申请一片内存，具体的数据只会修改 内存，后续才会更新磁盘，所以需要同步数据： fsync()(讲数据写入磁盘才会返回)， fdatasync()(只会关心数据，数据的属性不会同步), sync()(直接返回)
+
+fcntl :
+    1. 复制一个已有的文件描述符
+    2. 获取设置文件描述符标志
+    3. 获取设置文件状态标志
+    4. 获取设置异步IO所有权
+    5. 获取设置记录锁
+
+
+二、文件和目录
+获取文件属性函数   stat()(根据文件路径获取)， fstat()(根据文件描述符获取), lstat()( stat(), fstat(),不能获取软链接文件， lstat()可以获取到软链接文件属性)
+    struct stat 结构体中常用的数据有  stat.st_size(文件大小,只有普通文件，目录，软链接，管道 才有意义)， stat.st_mode (文件的读写权限), stat.st_nlink(文件硬链接数)， 
+                                    stat.st_uid(用户id)， stat.st_gid(组id)， 以及文件的时间属性
+
+进程在执行过程中有几个重要的id：    
+    实际用户id：    getuid()    表示该进程是哪个用户执行的
+    有效用户id：    geteuid()   表示该进程的有效用户id，有效用户id在对文件进行操作时，检测有限用户id 是否与 文件所属的用户id是否相同
+    实际用户组id：  getgid()    表示该进程是哪个用户组执行的
+    有效用户组id：  getedig()   表示该进程的有效用户组id，有效用户组id 在对文件进行操作时，检测有效用户组id 是否与 文件所属组id是否相同
+
+    进程id：       getpid()    进程运行的唯一标识
+    父进程id：      getppid()   父进程id，关系都 僵尸进程和孤儿进程问题
+    进程组id：      getpgid()   进程组id，管理多个进程
+
+    以上的id对应的设置函数：
+                    setuid(), seteuid(), setgid(), setegid(),  setpgid()
+
+
+文件类型： 普通文件，目录，管道，套接字，块设备，字符设备，软链接   (使用  S_ISXXX(stat.st_mode) 对文件进行判断)
+
+文件权限：  0000  ---->   [特殊权限，用户权限，用户组权限，其他权限]
+                                    |
+                                    v              用户         用户组        其他
+        [执行时设置用户id，执行时设置组id，保存正文] [读，写，执行] [读，写，执行] [读，写，执行]
+
+groups  查看当前用户属于哪些组
+
+sudo apt-get install members 
+members wuyz       查看组内的成员
+
+判断当前进程对文件的是否访问权限，   access(),   F_OK(文件是否存在), R_OK(文件是否可读),W_OK(文件是否可写), X_OK(文件是否可执行)
+
+为进程设置创建文件是权限屏蔽字    umask(),
+
+设置文件权限    chmod(), fchmod()   特殊权限 S_ISUID ： 表示执行该文件时，有效用户为 文件所属的 用户，不是执行该文件的用户
+                              特殊权限 S_ISGID ： 表示执行该文件时，有效用户组为 文件所属的 用户组，不是执行该文件的用户的用户组
+
+
+设置文件所属用户和用户组        chown()   fchown()  lchown()(设置软链接文件)
+
+空洞文件        lseek()  设置偏移量，在后面写入数据则会产生空洞文件，便于多线程下载数据
+                ls -l file      可以查看文件的逻辑大小
+                du -sh  file    查看文件所占磁盘的大小，每个磁盘的块大小不一样
+                stat file       可以看出文件所在的磁盘块大小
+
+文件截取        O_TRUNC（在打开时，截取文件为大小为 0）,  truncate(),  ftruncate()  ,   这两个函数可以截短一个文件，也可以扩容一个文件。
+
+
+文件的拷贝和删除： 文件拷贝只是 创建一个目录项，该目录项指向被拷贝文件的 inode节点。
+                link()(新目录项，只会创建最后一个分量), 
+                unlink()(如果是软链接，不会解引用，因为 unlink() 针对的是inode)
+
+                unlink() ： 删除该目录项，且对inode 节点的引用技术 减 1, 当该目录项指向的 inode节点 引用技术为 0, 且 没有进程打开相应的文件，才会直接删除 该文件。
+                close():    关闭文件描述符，检测有没有其他进程打开 该文件，检测 inode节点 引用计数是否为 0.如果没有其他进程打开，且引用计数为 0 则删除文件。
+
+临时文件：本质是在系统中创建一个 引用技术为 0 的 inode节点。
+                实现方法：  open(),  标志位： O_CREAT | O_TMPFILE ，及可以创建一个临时文件。  也可以 oepn() 标志位： O_CREAT + unlink() 结合
+
+                df dirpath    查看可用磁盘
+
+文件和目录的删除：   remove(),  如果指定路径是文件名，则与 unlink() 相同， 如果指定路径是 目录名 则与 rmdir() 相同
+
+文件重命名：    rename() (这里是针对目录项进行改动，目录，文件，引用都可以)
+
+软链接：        symlink() 创建一个软链接, readlink()，读取软链接的内容， 没有写入，因为创建的时候就指定了
+
+            描述：          检测访问权限    改变当前工作目录    修改文件权限    修改拥有者      执行文件    修改拥有者      链接文件(复制)  获取文件信息
+            系统调用 ：     access()        chdir()         chmod()         chown()     exec()      lchown()        link()       lstat()
+            不解软链接                                                                                ×                             ×
+            解软链接           ×              ×               ×               ×           ×                           ×
+
+
+文件的时间属性
+        stat.st_atime (access 文件数据最后访问时间)
+        stat.st_mtime (modify 文件数据最后修改时间)
+        stat.st_ctime (change 文件状态最后改变时间，系统并不维护 文件状态的访问时间)
+
+        改变文件的访问时间 和 修改时间可以通过   futimes()  lutimes() utimes()
+
+创建目录和删除目录：    mkdir()   创建一个文件夹， 文件夹的权限  
+                                                读：可以获取该文件下的目录项
+                                                写：可以对目录项的修改， 添加和删除
+                                                执行： 可以进入该目录项
+                    rmdir()     删除文件夹目录项，与 unlink() 删除文件相似
+
+文件夹的读写操作： opendir(),  fdopendir(),  closedir(), readdir(), rewinddir()(将目录句柄移动至开头), telldir()(返回光标的位置)， seekdir()(移动光标到某处)
+
+
+进程当前的工作目录：    这是进程的一个属性
+                    getcwd()(获取进程的当前工作目录)   chdir()(改变进程的工作目录) fchdir()(根据文件描述符改变进程的工作目录)
+
+
+三 标准IO
+    与文件IO一样，也提供了   stdin(in)  stdout(out)  stderr(err) 
+
+    标准IO 的作用是 为进程提供 IO缓冲，避免减少 read， write的次数
+
+3 种缓冲区类型：
+    1.全缓冲：在填满标准IO缓冲区后，才会进行一次 实际IO操作。   该句柄在第一次被 IO操作时，会使用 malloc 申请一个缓冲区。(文件操作通常使用全缓冲)，可以使用 fflush() 进行刷行缓冲。
+    2.行缓冲：当输入输出遇到 换行符， 标准IO库执行一次 IO操作。 (终端操作一般使用行缓冲)  限制： 1 行缓冲有固定的长度，当填满长度会 调用实际IO操作。 2.实际IO操作，会刷新缓冲
+    3.不带缓冲              (标准错误不带缓冲，标准输入和输出带行缓冲)
+
+    特征： 标准错误不带缓冲， 标准输入输出 指向交互式终端则是行缓冲，否则为 全缓冲。
+
+    设置 该流式句柄的缓冲模式和 缓冲指针。(注意应该在创建流式句柄后 立即进行设置)
+        setbuf()(设置全缓冲，这里的长度为 BUFSIZE 的长度)  setbuff(设置全缓冲，这个指定任意长度)  setlinebuf()  setvbuf()(多种缓冲设置)
+    fflush() 刷行缓冲， fclose() 也可以刷新缓冲
+
+打开文件        fopen(), fdopen()(这种函数主要作用在 特殊类型文件，使用对用的系统调用打开后，就可以与 IO流相结合)
+
+通过文件句柄获取文件描述符   fileno()
+
+关闭文件        fclose()
+
+错误和结尾判断      ferror()(是否错误),  feof(是否达到末尾),  clearerr()(清除错误和是否到达末尾)
+
+3 种不同的非格式化 IO
+    1.每次一个字符(这里的不是字节)
+                getc()(可能是一个宏)  fgetc()， getchar()(等于 getc(stdin))
+                putc()(可能是一个宏)  fputc(),  putchar()
+    2.每次一行
+                fgets()  获取一行数据，如果传入数组太小，则 获取到 （数组大小 -1）个数据，下一次fgets(),还是获取该行, 该行数据中包含 '\n'
+                puts()  将字符床输出到stdout，且将 NULL 替换为 '\n'
+                fputs() 将字符床输出，并不会增加 '\n' 原因是可能该操作是写入文件，不能增加额外字符
+    3.根据长度读取
+                fread() fwrite()  二进制写入
+
+
+定位光标位置    ftell() (获取当前光标位置)  fseek(设置光标偏移量)  rewind() (重置光标)
+
+格式化 IO 
+    不定参数输出：
+                printf(), fprintf(), dprintf(), sprintf(),  snprintf()
+    va_list参数输出：
+                vprintf(), vfprintf(), vdprintf(), vsprintf(), vsnprintf()
+    不定参数输入：
+                scanf(), fscanf(), sscanf()
+    va_list参数输入：
+                vsanf(), vfscanf(), vsscanf()
+
+
+四、系统数据文件和信息
+
+获取口令文件信息：
+        1.根据uid 或是用户名
+                getpwnam(), getpwuid(), getpwman_r(), getpwuid_r();
+        2.获取 /etc/passwd 文件信息
+                setpwent()  endpwentt()   getpwent()  getpwent_r() fgetpwent_r()
+
+获取阴影口令文件：
+        /etc/shadow
+        getspman()   getspnam_r(); //这个后续在学习
+
+获取用户组信息：
+        1. 根据 gid 或是用户组名
+                getgrnam()  getgrgid(), getgrnam_r()  getgrgid_r()
+        2. 获取 /etc/group 文件信息
+                setgrent()   endgrent()  getgrent()   getgrent_r()  fgetgrent_f();
+
+
+系统标识：
+        uname(), gethostname()
+                        sethostname()   只是零时更改主机名
+
+时间和日期
+        time()(单位为秒)  gettimeofday()(单位微妙，精确度高)  settimeofday(),
+        clock_gettime()  clock_settime()   clock_getres()
+
+        时间转为 struct tm 结构体
+                localtime(), localtime_r(), gmtime(), gmtime_r();
+        struct tm 结构体转为 时间
+                mktime()
+
+        struct tm  转为 字符床
+                asctime(), asctime_r(),   strftime();
+        字符床转为 struct tm
+                strptime()   比较有用的格式化：    "%A"  -> 星期几
+                                                "%F"  -> "2022-11-14"格式的日期
+                                                "%T"  -> "11:19:20"格式的时间
+
+
+
+五、进程环境
+
+1.进程的启动      内核调用 crt程序  -->   exit(main(int argc, char** argv));
+
+
+2.进程的结束    
+        正常结束：
+                1. 从 main() 返回
+                2. 调用 exit()  函数， 虽然调用 _Exit() 和 _exit() 都能结束进程，但是不建议使用(这两个函数直接陷入内核)，exit() 函数会做一些用户资源的清理，才会陷入内核，执行系统资源的清理。
+                3.最后一个线程 从 线程入口函数结束
+                4.最后一个线程 调用 pthread_exit();
+        异常结束：
+                1.调用 abort();     (虽然是程序员控制，但是该函数内部会出发 SIGAORT信号)
+                2.接收系统出发的信号
+                3.最后一个线程对取消请求做出响应
+        
+        进程退出执行的注册函数
+                atexit()           后注册的函数，先执行.  出发退出函数有两种情况： 1. main 函数返回， 2.执行exit() 函数。
+
+        查看进程退出状态
+                shell 执行 echo $?  (返回前一个程序执行的状态)
+
+3.命令行参数
+        main(int arc, char** argv)      参数来自执行命令行， argc 表示执行该程序时的命令行个数， argv数组保存指向各个命令行的指针
+
+
+4.环境表
+      每一个进程都会有一个环境变量表，  extern char** environ 数组指针指向该环境变量表
+      可以使用系统系统的函数获取和设置环境变量(注意环境变量修改需要小心，因为要考虑内存的问题)
+                getenv()  secure_getenv()  putenv()  setenv()  unsetenv()  clearenv()
+
+5.C程序的存储空间布局
+        高地址 ------------------------------------------------------------------------------------------------------------------------------------------------> 低地址
+        环境变量，命令行参数，          栈(从高往低增长)        堆(从低往高增长)        bss(为初始化数据段， 由exec执行该进程时，初始化内容为0)    初始化数据段         正文(代码段)
+
+6.内存分配空间
+        malloc()        calloc()        realloc()       free();
+
+
+7.setjmp() 和 longjmp() (sigsetjmp 和 siglongjmp)
+        跨越函数的跳转
+
+六、进程控制
+
+1.进程ID：进程的唯一标识
+
+        linux 没有提供可以获取子进程的 函数。
+
+2. fork()
+        两次返回， 返回 0 表示当前的进程为 子进程
+                 返回 1 表示当前的进程为 父进程
+                 返回 -1 表示该系统调用失败，两个原因：(1)系统的进程数太多， (2)当前的实际用户ID 拥有的最大进程书 超过了 CHILD_MAX
+
+        
+        1.子进程获取 父进程 的数据空间，堆和栈的副本。
+        2.文件共享， 父子进程的文件描述符 好像使用 dup() 函数一样，他们共享文件描述表
+
+3. vfork() 
+        1.也是创建一个子进程，但是其函数的目的是 调用 execv() 执行其他程序， 所以在实现是 vfork() 的子进程 是在父进程的地址空间中运行(子进程有自己的栈空间)，所以子进程修改数据是会改变父进程的 数据。
+        2.该函数是 子进程先执行，且 子进程调用 execv() 或是 exit() 后(直接返回会出现段错误)， 父进程才会执行
+
+4. wait() 和 waitpid()
+        当一个进程正常或是异常终止时，内核向其父进程发送 SIGCHLD 通知 父进程，子进程结束(默认该信号是忽略)， 父进程便可以在里面调用 wait() 和 waitpid() 进程处理子进程资源回收。 而在父进程中又可以做其他事请
+
+        返回状态可以用宏来处理
+                        1.检测是否正常退出：     WIFEXITED(status) 为真表示正常退出， WEXITSTATUS(status) 返回 正常退出的状态
+                        2.检测是否为信号退出(异常退出)  WIFSIGNALED(status) 为真表示(信号终止)异常终止， WTERMSIG(status) 获取的终止信号编号
+                        3.检测是否为被挂起              WIFSTOPPED(status)  为真表示子进程被某个信号挂起  WSTOPSIG(status) 获取使子进程暂停的信号
+                        4.检测子进程是否继续运行        WIFCONTINUED(status)
+
+        如果父进程一直子运行，但是子进程会比父进程提前结束且父进程不一直等待处理子进程的资源回收，且不让子进程变为僵尸进程，则可以两次调用 fork(),
+                        这里利用的是 孤儿进程的父进程是 init 进程，之后 init 会对孤儿进程进行资源回收
+
+5. waitid() 
+        这也是一个等待子进程退出的函数，其功能和 waitpid() 相似
+
+6. wait3() , wait4();
+        其功能是等一个结束的子进程，并获取子进程的一些系统信息
+
+7.exec 函数
+        execl()
+        execv()
+        execle()
+        execve()
+        execlp()
+        execvp()
+        fexecve()
+
+8.解释器文件
+        解释器文件解释的是文本文件， 开头 ---->        #! filepath(解释器程序)
+
+
+9. system()        
+        执行 shell 命令的系统调用
+
+10.进程时间
+        times()
+
+
+七、进程关系
+
+1.进程组id，管理多个进程
+
+        1.获取进程所在的进程组： getgpid() getpgrp();
+        
+        2.创建进程组 和 加入一个进程组： setgpid()  setpgrp()
+
+
+八、信号
+        信号是一种软中断，实现方式为异步。
+
+        信号 SIGKILL SIGSTOP 这两个信号比较特殊，不能忽略
+
+1.signal()      这是最简单的设置信号的系统调用，但是该函数在一些系统上只支持不可靠信号， 注意该函数的返回值是上一个注册函数的地址
+
+        程序启动： 调用 exec 函数， 进程地址会发生改变，所以所有的信号都会变为默认状态
+
+        进程创建： fork() 函数， 信号的处理会跟随父进程的处理方式
+
+
+2.不可靠信号
+        1.有时信号发生，但是进程却没有收到信号
+        2.进程可以对信号进行 捕抓和忽略，但是不能阻塞信号(发生信号，内核先记住信号，等进程准备处理在通知进程)
+        3.早期的版本在信号处理函数中，需要重新添加信号处理函数，否则下次的信号处理为默认处理。(这会造成在触发执行信号处理函数到再次添加处理函数之前如果有信号则会有问题)
+
+3.中断系统调用
+        当进程进行系统调用陷入主塞，且同时发生信号， 内核的然进程执行信号捕捉函数，且 让系统调用出错返回，并设置 errno = EINTR
+
+4.SIGCHILD
+        当子进程的运行状态发生改变(子进程停止，继续，以及终止)，则会产生该信号
+
+5.可靠信号
+        产生一个信号：  有事件发生
+        传递一个信号：  对信号采取动作(执行处理动作)
+        未决信号：      产生一个信号到 传递一个信号之间称该信号为未决信号
+        阻塞信号：      产生一个信号，记住该信号但是不传递该信号，等到进程不阻塞该信号时，才传递该信号给进程。
+        阻塞信号是否支持多次：  这个有系统是否支持排队信号功能，
+
+        信号屏蔽字( sigset_t 数据类型)：    每个进程都有一个阻塞集合，该集合对应的信号被置位，则会阻塞该信号
+
+
+6. kill() 和 raise()
+        raise()         想本身进程发送信号
+        kill()          向指定的进程或是进程组发送信号。 其中 pid_t 的参数与  waitpid() 的 pid_t 类型参数一致
+
+7. alarm() 和 pause()
+        alarm()         定时时间到达会产生 SIGALRM,(设置一次只会产生一次， 当传递的参数为 0 表示取消定时器)(alarm 功能则是用来处理阻塞的进程)
+        pause()         挂起进程，直到捕抓一个信号。(只有处理完信号处理函数， pause 才会返回，返回值为 -1 ，且 errno = EINTR，使用到中断系统调用功能)
+
+8.信号集合
+        sigemptyset()   设置 信号集合全为0
+        sigfillset()    设置 信号集合全为1
+        sigaddset()     向某个集合中添加 某个信号
+        sigdelset()     向某个集合中删除 某个信号
+        sigismember()   判断某个信号是否在该集合中为 1
+
+9. sigprocmask()   ----> 单线程进程
+        检测或是更改 信号屏蔽字，或者同时 检测和更改 信号屏蔽字
+
+10. sigpending()     
+        获取全部未决信号
+
+
+11. sigaction()         推荐使用的信号注册函数
+        struct sigaction {
+               void     (*sa_handler)(int);                             //信号处理函数一般使用此变量
+               void     (*sa_sigaction)(int, siginfo_t *, void *);      // 当sa_flags 中包含 SA_SIGINFO, 信号处理函数使用此变量
+               sigset_t   sa_mask;                                      //执行该信号处理函数时的信号屏蔽字，会在执行信号处理函数时，设置为进程的信号屏蔽字，执行完在回复
+               int        sa_flags;                                     SA_SIGINFO(使用 sa_sigaction 函数变量)， SA_RESTART(中断系统调用，尝试重新调用)， SA_INTERRUPT(阻止中断系统重新调用)
+               void     (*sa_restorer)(void);
+           };
+
+
+12. sigsetjmp() 和 siglongjmp()
+        不是很懂其作用
+
+13. sigsuspend()                
+        作用：  解除当前的 信号屏蔽字，设置当前信号屏蔽字为 该系统调用的 的屏蔽字，并且阻塞等待信号产生，最后返回时，恢复原来的信号屏蔽字
+
+
+
+九、线程
+
+1. 每个线程都有 屏蔽字，以及errno
+
+2.pthread_equal()       判断两个线程是否相等，(不同的操作系统实现可能不能同)
+
+3. pthread_self()       获取线程id，线程id只有在同一个进程中才会存在意义
+                        linux 想要查看 线程内核id 可以使用  syscall(SYS_gettid);  SYS_getpid 这是获取进程，需要注意
+
+                        top -Hp pid 查看进程下的所有 线程id
+
+4. pthread_create()     创建一个线程，可以指定线程属性，
+
+5. 线程终止
+        1.从线程入口函数返回
+        2. 线程可以被同一进程的 其他线程取消(如果线程属性设置为不能被取消，则不可以取消，默认可以取消)
+        3. 调用 pthread_exit()
+
+6.pthread_join()        
+        等待对应的线程退出， 一般情况 不需要对 返回值进行取值，而是直接使用指针的地址。  PTHREAD_CANCELED 就是地址值
+
+7. pthread_cancel()
+        在同一个进程内 可以取消某一个线程的运行，但是有时可能无效
+
+8.线程退出清理 与 atexit() 进程退出相似
+        pthread_cleanup_push()          添加退出的函数
+        pthread_cleanup_pop()           执行退出的函数
+
+        这两个函数必须成对存在。
+
+        退出处理执行程序有三种：
+                1.调佣pthread_exit()
+                2.被其他线程 取消。
+                3. 调用 pthread_cleanup_pop(arg) , arg ！= 0;
+
+9. pthread_detach()
+        分离线程，线程在终止时，底层资源立即被回收。 被 pthrea_detach() 的线程不能 使用 pthread_join() 去等待线程退出
+
+
+10.互斥量
+        pthread_mutex_init()
+        pthread_mutex_destroy();
+        pthread_mutex_lock();
+        pthread_mutex_trylock();
+        pthread_mutex_unlock();
+        pthread_mutex_timedlock();      //这里的超时是绝对时间，不是相对时间
+
+11.读写锁
+        pthread_rwlock_init();
+        pthread_rwlock_destroy();
+        pthread_rwlock_rdlock();
+        pthread_rwlock_tryrdlock();
+        pthread_rwlock_wrlock();
+        pthread_rwlock_trywrlock();
+        pthread_rwlock_unlock();
+        pthread_rwlock_timedwrlock();   //这里的时间是绝对时间
+        pthread_rwlock_timedrdlock();   //这里的时间是绝对时间
+
+12.条件变量
+        pthread_cond_init();
+        pthread_cond_destroy();
+        pthread_cond_wait();
+        pthread_cond_timedwait();
+        pthread_cond_signal();          //信号至少唤醒一个正在等待的线程(在条件成立的时候在唤醒，也就是在互斥锁的后面唤醒锁)
+        pthread_cond_broadcast();       //信号唤醒全部正在等待的线程(在条件成立的时候在唤醒，也就是在互斥锁的后面唤醒锁)
+
+13.自旋锁(不会进入休眠和阻塞，而是一直占用cpu时间，不停的轮询检测)
+        pthread_spin_init()
+        pthrad_spin_destroy();
+        pthread_spin_lock();
+        pthread_spin_trylock();
+        pthread_spin_unlock();
+
+14.屏障：用户协调多个线程同步并行工作的同步机制，（pthread_join() 也是一个屏障，但是他是一个线程与另外一个线程同步），屏障可以允许任意数量的线程等待
+
+        pthread_barrier_init();
+        pthread_barrier_destroy();
+        pthread_barrier_wait();                 //等待其他线程都运行到此处
+
+
+十、线程控制(线程属性和同步属性)
+
+1.线程属性 
+        pthread_attr_t
+        pthread_attr_init()     //初始化为系统的默认值
+        pthread_attr_destroy();
+
+        pthread_attr_setdetachstate();          // 设置线程 是否为 分离状态
+        pthread_attr_getdetachstate();          //获取线程分离状态
+
+        pthread_attr_setstack();                //设置线程栈大小，这里指明了栈的地址空间
+        pthread_attr_getstack();                //获取线程栈大小
+
+        pthread_attr_setstacksize()             //设置栈的大小，使用的是系统分配的地址
+        pthread_attr_getstacksize()             //获取栈的大小
+
+        pthread_attr_setguardsize()             //栈的末尾守护内存
+        pthread_attr_getguardsize()
+
+2.互斥量属性
+        pthread_mutexattr_t 
+        pthread_mutexattr_init()
+        pthread_mutexattr_destroy()
+
+        pthread_mutexattr_setpshared()          //设置互斥量 是否为进程共享
+        pthread_mutexattr_getpshared()          //获取互斥量 进程共享状态
+
+        pthread_mutexattr_getrobust()           //进程共享互斥锁， 会使用到 健壮属性 设置为PTHREAD_MUTEX_ROBUST 使用 ptrhead_mutex_lock 会产生 EOWNERDEAD 表示其他进程持锁但是终止了
+        pthread_mutexattr_setrobust()           // 设置 健壮属性
+
+        pthread_mutex_consistent()              //作用就是在设置健壮属性之后，返回 EOWNERDEAD ，使用该函数更改 持有互斥加锁的属主，然后在解锁
+
+        pthread_mutexattr_gettype()
+        pthread_mutexattr_settype()             //设置互斥量属性，互斥量有 正常属性，错误检查属性， 递归属性
+
+
+3. 读写锁属性
+        读写锁只支持 进程共享属性
+
+        pthread_rwlockattr_t
+        pthread_rwlockattr_init();
+        pthread_rwlockattr_destroy();
+
+        pthread_rwlockattr_setpshared();
+        pthread_rwlockattr_getpshared();
+
+4.条件变量属性
+        条件变量有进程共享属性 和 时间属性
+
+        pthread_condattr_t
+        pthread_condattr_init()
+        pthread_condattr_destory();
+
+        pthread_condattr_getpshared();
+        pthread_condattr_setpshared();
+
+        pthread_condattr_getclock();    
+        pthread_condattr_setclock();
+
+5.屏障属性
+        phtread_barrierattr_t
+        pthread_barrierattr_init()
+        pthread_barrierattr_destroy();
+
+        pthread_barrierattr_getpshared();
+        pthread_barrierattr_setpshared();
+
+6.线程局部 变量
+        1.多线程只有一次调用
+                pthread_once_t once_control = PTHREAD_ONCE_INIT;
+                pthread_once();
+
+                std::call_once();
+
+        2.线程局部变量
+
+                gnu gcc编译器
+                __thread 不支持class类型——其不能自动调用构造函数和析构函数
+                __thread int a;  //这个是一个线程私有的数据
+
+                c++编译器
+                thread_local 支持class类型——其不能自动调用构造函数和析构函数
+                thread_local int a;
+
+                
+                pthread_key_create()            //初始化一个key， 多个线程可以同时使用该key
+                pthread_key_delete()            //删除初始化的 key
+                pthread_setspecific()           //设置线程  key 对应的 value
+                pthread_getspecific()           //线程根据 key 获取线程内部的 value
+
+7.线程取消
+        线程的两个属性不再  pthread_attr_t 结构体中
+        分别为 可取消状态  和  可取消类型 
+
+        可取消状态可以为 PTHREAD_CANCEL_ENABLE  和 PTHRAD_CANCEL_DISABLE
+        PTHREAD_CANCEL_ENABLE(默认状态)         当有线程调用 pthread_cancel() 发出取消请求，线程运行到取消点，检测有取消请求，则会响应取消请求
+        PTHREAD_CANCEL_DISABLE                  当有线程调用 phtread_cancel() 发出取消请求， 取消请求会被挂起， 线程运行到 取消点 不会检测是否有取消请求，
+                                                        直到 状态变为 PTHREAD_CANCEL_ENABLE， 再下一个取消点会进行检测，
+
+        pthread_testcancel();           //此函数是增加取消点，并不是一定检测是否取消请求
+
+
+        可取消类型 为  PTHREAD_CANCEL_DEFERRED(推迟类型，默认类型)  和 PTHREAD_CANCEL_ASYNCHRONOUS(异步类型) (线程在任意地方可以别取消，而且是立即去取消)
+
+8.线程与信号
+        每个线程都有信号屏蔽字，但是信号处理是 进程中所有线程共享的。也就是某个线程修改了 信号处理行为，其他线程的处理行为都应该改变
+
+        新创建的子线中的信号屏蔽字 和 创建者一致
+
+        sigprocmask()                   屏蔽单线程进程。
+        phtread_sigmask()               屏蔽多线程进程时使用
+        pthread_kill()                  向某个线程发送信号，该线程会处理该信号
+        kill()                          向某个进程发送信号，进程中的任意线程都有可能会处理
+        sigwait()                       等待一个或是多个信号,传入的集合表示等待 的信号集合，在开始等待传入的信号集合时，会先解除信号屏蔽字，这是原子操作
+                                        可以使用一个线程去等待要处理的信号，这样子避免其他线程被信号中断
+
+        系统调用软中断，在多线程中，哪个线程执行了信号处理函数，哪个线程才会发生系统中断，其他的线程还是会阻塞住。
+        在linux 中想要向 线程发送 信号， 需要知道 线程在 linux的 tid 号( syscall(SYS_gettid)), 不是 pthread_self()(这个线程号，只有在进程中才有效)
+
+        top -Hp pid 查看进程下的所有 线程id
+
+9.线程与 fork()
+        fork() 会对进程进行拷贝数据，也会包含 全局 条件变量和互斥锁， 但是这个 条件变量和互斥锁，在子进程中会无效，
+        
+        pthread_atfork();
+
+
+十一、高级IO
+
+1.非阻塞IO
+        当对某个IO进行读写时，这些操作不能立即完成，则直接出错返回。
+
+        对IO设置为非阻塞有两种做法：
+                1. open() 时，指定文件状态标志为  O_NONBLOCK
+                2. fcntl() 通过  F_GETFL 参数，取出 文件状态标志， 在 通过 F_SETFL 设置 文件状态标志为 O_NONBLOCK。
+
+2.记录锁(进程锁)
+        记录锁锁住的是文件的一个区域(可以是整个文件)，但不是每次锁整个文件。
+
+        flock() , fcntl(), lockf()
+
+        1. flock() 对整个文件进行上锁，不能对部分文件进行加锁
+        2. lockf() 不是系统调用，其内部调用了 fcntl()
+        3. fcntl() 可以针对文件的都个区域进行加锁
+
+        文件描述符 -----> 在进程中
+        文件页表   -----> 在内核中(没有文件描述符指向该文件页表，内核才会释放该页表)
+        文件节点   -----> 在文件系统中
+
+        flock()   这是一个建议锁，也就是文件获取不到锁的情况下，其实是可以对文件进行读写操作。
+                        flock() 加锁与文件打开的文件页表相关，
+                        fork() 和 dup(), dup2() 时，这些文件描述符都可以操作这把锁，所在避免出现这种情况
+
+                在已经加锁的情况可以，从新加锁，也就是不释放加锁所属，但是改变加锁方式。最后只需要释放一次锁
+
+                LOCK_NB 可以进行非阻塞加锁
+                LOCK_SH 共享加锁，也就是读锁
+                LOCK_EX 排斥加锁，也就是写锁
+                LOCK_UN 解锁
+
+
+        lockf()   这个函数没有读写锁说法。  加锁的范围是当前文件位置cur 到  cur + (指定长度) ， 指定长度可以为整数，负数，当为 0 表示对整个文件进行加锁。
+                F_LOCK  阻塞加锁
+                F_TLOCK 尝试加锁
+                F_ULOCK 解锁
+
+        fcntl()
+                锁可以进行递归加锁，加锁后新锁替换老锁
+                F_GETLK 不能检测自己已经加锁的信息，只能其他没有获取锁的进行检测
+                进程终止锁则会释放
+                关闭文件描述符，则会释放该锁。加入使用 dup 后， 只要一个关闭，锁也会被释放
+                fork() 不会继承文件锁，这点与 flock() 不同
+
+                F_SETLK 非阻塞设置锁
+                F_SETLKW 阻塞设置锁
+                F_GETLK 获取锁的状态
+
+3. IO 多路转接(对一个IO进行读数据，处理后又写回去)
+
+        1. select() 所有操作系统都可以使用, 线性数据结构，且 监听文件描述符有上限
+                第一个参数为监听的最大文件描述符 + 1 (不是文件描述符个数)
+
+                传入的文件描述集合在返回时是会发生改变，下此再监听需要重新注册, 超时时间为 微妙
+
+                fd_set 监听文件描述符集合，这个与 sigset_t 信号集合 比较相似
+                FD_ZERO()                       sigemptyset()
+                                                sigfillset()
+                FD_CLR()                        sigdelset()
+                FD_SET()                        sigaddset()
+                FD_ISSET()                      sigismember()
+
+        2.poll() linux平台可以使用，线性数据结构， 监听文件描述符没有上线
+                第一个参数为 监听 struct pollfd 数组
+                第二个参数为 数组大小
+
+                优点为 返回时不改变数组信息，只会 struct pollfd 内部的一个返回事件， 超时时间为  毫秒
+
+        3. epoll()
+
+4. writev() 和 readv()
+
+        writev() 聚集写
+        wreadv() 分散读
+
+        struct iovec {
+                void *iov_base;
+                size_t iov_len;
+        };
+
+
+5. IO 存储映射 
+        对文件的读写，都是先打开文件，内核会申请一块内存，每次读写，都会进行系统调用，陷入内核中去读写对应的内存。
+        内存映射是 将内核中的内存映射到用户区，用户对内存地址访问则可以获取到数据，不需要进行系统调用
+
+        mmap()
+                prot:
+                        对内存的操作权限
+                        PROT_EXEC       可执行的
+                        PROT_READ       可读的
+                        PROT_WRITE      可写的
+                        PROT_NONE       不可访问的
+
+                flag:
+                        MAP_SHARED      映射文件和 内核打开的文件句柄内存是共享，对内存进行写操作，后面调用 msync() 或 是 munmap() 会更新到文件
+                        MAP_PRIVATE     映射文件 是私有的，在映射以后，对内存数据的改变不会影响 文件。
+        munmap()
+        mprotect()      //更改权限
+        msync()         //刷新存储映射
+                flags:
+                        MS_ASYNC 异步同步到内核
+                        MS_SYNC  同步到内核，才会返回
+
+        SIGBUS 某个部分访问不存在，则会产生该信号
+        SIGSEGV 访问权限出错会产生该信号
+
+        这时调用 fork() ,也会存在该内存映射。但是执行exec() 之后则不会。
+
+十二、进程间通信
+
+1.pipe()        返回读写文件描述符，fd[0] 读， fd[1] 写
+                当对管道进行读操作时，如果管道的 read 端关闭，继续向及写入，则会产生 SIGPIPE 信号。 如果忽略该信号， 则会返回 -1 且 errno = EPIPE
+
+                more 命令   b 返回上一页   space 向下翻一页   n 查找正则表达式     /+表达式
+
+                如果系统中没有进程引用管道，则会删除管道
+                
+2. fpathconf()  查看最大文件名长度，最大路径长度，最大输入行号， 管道写入最大长度
+        可以查看写入管道的大小 写入大小为 4096
+
+
+3. popen() 和 pclose()  标注库利用 pipe 提供了一个创建子进程， 执行相应的命令，父进程与子进程进通过 FILE 句柄进行交互
+
+
+4. mkfifo()     这是一个标准库，并不是系统调用， 内部调用和 mknod() 创建一个节点 mknod("./fifo1", __S_IFIFO| 0660,0);
+
+        管道的特性：
+                1.在阻塞的情况下，必须有读写打开一个管道，才能打开成功。同时打开读写，立即返回。但是只打开读，需要等待其他进程(线程)打开写才会返回。
+        
+        系统中如果没有进程引用 fifo，怎会删除 fifo，系统中只会留下 fifo文件名
+
+
+5. xsi ipc 通信
+        内核会 更具标识符 维护一个 ipc 通信结构体 但是 系统需要向用户提供一个 key(类型 key_t),以便 多个进程靠这个key ，找到 ipc 通信结构体
+
+        ftok()          //根据 指定文件 和 工程id 决定一个 唯一 key。
+
+        ipc 结构在 linux 系统文件上不能呈现。但是可以通过命令去查看 
+                ipcs    查看 系统的所有 ipc 结构体
+                ipcmk   创建一个 ipc 结构体
+                ipcrm   删除一个 ipc 结构体
+        
+        ipc 结构体没有引用计数，所以当 ipc 结构体中存在数据，且没有进程 使用该 结构体，内核不会删除 其结构体。
+
+6. 消息队列 (在消息有优先级可以使用此通信)
+
+        msgget()        创建一个 消息队列结构体       IPC_CREAT |  IPC_EXCL 结合时，如果该消息队列存在， 会 返回 -1, errno = EEXIST
+                        第二个参数要指定 权限 0660
+
+        msgctl()        设置结构体信息，获取结构体信息，删除结构体信息， 立即删除该消息队列， 其他进程再次获取数据，会返回 -1, errno = EIDRM
+
+                        struct msginfo {
+                                long msgtype;           //消息类型(必须是长整型)，消息类型在 数据接收时可以选择以类型接收(这个参数必须大于0，等于0 也不行)
+                                char msgdata[n];        //数据， 默认的最大值为 16k
+                        };
+        msgsnd()        发送数据，队尾放入
+                        第一个参数是消息队列
+                        第二个参数是 消息结构体
+                        第三个参数指定的是数据类型的大小，因为 消息类型固定为 长整型，只需要给出数据大小即可。
+                        第四个是 0 或是 IPC_NOWAIT， IPC_NOWAIT 表示非主塞。
+                                errno = EINTR 表示信号中断，
+                                errno = EAGAIN 表示消息队列已经满了。
+                                errno = EIDRM   表示消息队列被删除了
+
+        msgrcv()
+                        第一个参数是消息队列
+                        第二个参数是 消息结构体
+                        第三个参数指定的是数据类型的大小，因为 消息类型固定为 长整型，只需要给出数据大小即可。
+                        第四个参数是可以指定消息类型
+                                msgtyp == 0, 从队头取
+                                msgtyp > 0      指定数据类型
+                                msgtyp < 0      指定小于等于绝对值的类型，有多个取最小的
+
+7.信号量 (这个有点难)
+        信号量和条件变量的区别：
+                1. 信号量不可以一次唤醒多个等待该资源的进程(线程)，条件变量可以
+                2. 信号量是可以记住资源的状态， 条件变量是不可以，当条件变量进行唤醒时，如果没有进程(线程)在等待，那么该唤醒就会丢失。
+                3. 信号量 和 条件变量 在进程和线程都可以使用，但是一般 是信号量用于 进程，条件变量用于线程
+
+        信号量： 为正数，引用计数减一，为 0 则进程休眠
+
+
+        semget()        创建或是获得一个信号量
+        semctl()
+        semop()
+        
+8.共享内存
+        共享内存： 允许两个或是多个进程共享一快内存存储 (用在进程通信)
+        存储映射： 将文件(内核中的存储) 映射到 用户的 内存地址(用来操作文件，提高访问效率)。
+
+        shmget()        如果是创建要指出创建内存的大小，其大小会按照页表的大小进行创建，但是不能使用超出自己指定的大小。如果是获取一个内存共享，大小可以为 0
+        shmctl()        删除内存共享
+
+        shmat()         将内存共享连接到进程内部 
+                        第二个参数一般传入0, 系统会自行分配
+                        第三个参数 如果不指明 SHM_RDONLY 则表示为可读可写内存
+
+        shmdt()         解除内存共享的连接
+
+9. posix 信号量
+        posix 信号量有两种： 命名(多进程中使用) 和 为命名(一个进程中的多线程使用)
+
+        命名信号量：
+                sem_open()              创建或是打开一个信号量
+                sem_close()             关闭当前的信号量，但是不会删除该信号量
+                sem_unlink()            删除该信号量，不会立即删除，当引用技术为0才会删除
+
+        无名信号量：
+                sem_init()              
+                sem_destroy()           无名信号量不使用时应该将其摧毁
+
+        操作：
+                sem_post()              信号量技术 +1
+                sem_wait()              当信号量技术为 0, 则进入阻塞
+                sem_trywait()           
+                sem_timedwait()         绝对时间 等待
+                sem_getvalue()          获取当前信号量的值
+
+        有名信号量保存在  /dev/shm/   目录下
+
+
+十三、网络IPC 套接字
+
+        ip： 表示指定 计算机
+        port： 表示指定 服务名 (在计算机领域中 服务就是只端口号)
+
+        ip地址是一串二进制数据，人们为了便于查看 ip地址， 便将ip地址转为 点分十进制字符串，为了更好的记忆和交流 又出现了 域名 解析成 ip地址。
+        port端口是一个 unsigned short 类型数值， 它决定了 一台计算机上的 那个 服务进程， 人们为了更好的 记忆和交流 就出现了 服务名称(tftp, http 等)
+
+        套接字是一种通信方式， 和 管道，fifo，消息队列，信号量，内存共享 概念一样。只是 socket 绑定了 AF_INET 或是 AF_INET6 ，那么就可以进行网络通信， 也可以绑定 AF_UNIX 进行本地通信
+        
+        socket()        创建一个套接字，并返回类似 文件描述符 一样的 套接字描述符，
+                        第一个参数： 指定 套接字 通信的特性(网络通信还是本地通信) 
+                        第二个参数： 指定 套接字通信的特征(报文 还是 字节流)
+
+        shutdown()      可以单向关闭 套接字的读端 或是 写端
+        close()         只有套接字的 文件描述符全部被关闭了，套接字才会真正的关闭，也就是当 fork(), 和 dup(), dup2() 时，只 close() 一次，那么是不会真正的关闭套接字
+
+1. 字节序
+        大端字节序：    最高位字节存储在低地址
+        小段字节序：    最低位字节存储在低地址
+
+        TCP/IP 网络通信 采用的是大端模式进行传输，但是 计算机处理器 有的是大端有的是小段。
+
+        计算机(不管是大端字节序还是小段字节序，会根据自身是大小端字节序进行转换)
+
+                htons()         主机转网络两字节
+                htonl()         主机转网络四字节
+                ntohs()         网络转主机两字节
+                ntohl()         网络转主机四字节
+
+        字节序反转(不会根据自身是什么 大小端字节序)
+                
+                bswap_16()
+                bswap_32()
+                bswap_64()
+
+        点分十进制字符床 与 二进制网络 互转
+
+                inet_pton()     主机转网络
+                inet_ntop()     网络转主机
+
+2. 网络地址
+
+        struct sockaddr;        //通用的网络地址
+        struct sockaddr_in;     //ipv4网络地址
+        struct sockaddr_in6;    //ipv6网路地址
+        struct sockaddr_un;     //本地通信地址     
+
+3. 地址查询
+        
+        gethostname()           //获得主机名称
+        sethostname()           //临时修改主机名称
+
+        sethostent()            //打开  /ect/hosts 文件
+        gethostent()            //获取 一个 struct hostent 结构体数据
+        endhostent()            //关闭  /ect/hosts 文件
+
+        //通过 主机名 获取 地址信息
+        gethostbyname()         获取主机名成的ip地址，先会去 /ect/hosts 文件查看，才去访问 dns 服务器
+        gethostbyname_r()
+
+        //通过 ip地址 获取 地址信息
+        gethostbyaddr()                 //想要通过 ip 地址 得到 主机名，本地需要有 反解析服务，否则可以在 /etc/hosts  文件中增加对应的ip 和 主机名关系
+        gethostbyaddr_r()
+
+        gethostbyaddr() gethostbyaddr_r() gethostbyname() gethostbyname_r() 时过时的系统调用
+        
+        getaddrinfo() 替代 gethostbyname()
+        getnameinfo() 替代 gethostbyaddr()
+
+
+        getaddrinfo()                   //将一个主机或是一个服务  转为 一个 struct addrinfo 地址信息，里面可以 获取ip地址
+        freeaddrinfo()                  //释放 getaddrinfo() 返回的 struct addrinfo 内存
+        gai_strerror()                  //错误码 解析
+        getnameinfo()                   //通过一个 struct sockaddr(ip) 获取到 主机或是服务名称
+
+4.将 套接字 与 地址 进行绑定
+
+        bind()          INADDR_ANY 指定套接字可以绑定到所有的系统网络接口上
+
+        getsockname()           //可以通过 fd 获取到 struct sockaddr 结构体 数据，但是前提是必须明确 fd 描述符 绑定的地址是 ipv4 还是 ipv6 
+        getpeername()           // 如果该套接字描述符 与 对方连接成功， 可以获取对方的 struct sockaddr 结构体数据 
+
+5. 建立连接
+
+        如果想要 处理一个面向连接的网络服务，必须要建立连接 。
+
+        connect()               //将 套接字描述符 只向的套接字  与 指定的地址进行连接。 如果 套接字没有进行绑定，系统会进行绑定。
+
+                                连接失败问题：
+                                        在有些系统中，如果 套接字 连接失败，该套接字就变成了一个无用的套接字 (下次连接也会失败)。 需要将其关闭。
+
+                                非阻塞套接字：  在进程调用 connect() 进行连接，三次握手不能马上建立，会立即返回 -1 且  errno = EINPROGRESS(正在进行中)， 
+                                                这时要将 套接字描述符 加入 select() 或是 epoll() 中，检测可以 写，表示 连接成功
+
+        udp 协议 发送数据的方法：
+                1. socket()  [ bind() ] sendto() recvfrom()  close()
+                2. socket()  [ bind() ] connect()  send()  recv()  close()
+
+                如果在进行 udp 数据报的发送，且只往一个 目标发送，可以使用 connect(), 其作用有两个：  1.检测目标服务是否存在。 2.让内核记住 socket 描述符对应的套接字 的 目标服务地址 
+
+                upd 可以 多次调用 connect() ,作用修改 目标地址，或是断开与目标地址连接(sin_fimaly = AF_UNSPEC)
