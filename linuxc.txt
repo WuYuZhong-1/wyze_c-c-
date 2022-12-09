@@ -884,6 +884,14 @@ members wuyz       查看组内的成员
         struct sockaddr_in6;    //ipv6网路地址
         struct sockaddr_un;     //本地通信地址     
 
+
+        IPv4 由 32位(数)表示， 其中又分为 网络ID 和  主机ID, 网络ID 和 主机 ID 由子网掩码划分(也是由 32 位整形数表示)
+                IPv4 由点分十进制表示，子网掩码也是由点分十进制表示   (分为 四段，每个字节为一段)
+
+        IPv6 由 128位(4个整形数  或 16个字符型)表示， 其中又分为 网络前缀 和 接口标识
+                IPv6 由 冒分十六进制法+ 0 位压缩表示法 (分为 八段， 每两个字节为一段)
+
+
 3. 地址查询
         
         gethostname()           //获得主机名称
@@ -912,6 +920,11 @@ members wuyz       查看组内的成员
         gai_strerror()                  //错误码 解析
         getnameinfo()                   //通过一个 struct sockaddr(ip) 获取到 主机或是服务名称
 
+
+        获取网卡信息
+        getifaddr()
+
+
 4.将 套接字 与 地址 进行绑定
 
         bind()          INADDR_ANY 指定套接字可以绑定到所有的系统网络接口上
@@ -938,3 +951,49 @@ members wuyz       查看组内的成员
                 如果在进行 udp 数据报的发送，且只往一个 目标发送，可以使用 connect(), 其作用有两个：  1.检测目标服务是否存在。 2.让内核记住 socket 描述符对应的套接字 的 目标服务地址 
 
                 upd 可以 多次调用 connect() ,作用修改 目标地址，或是断开与目标地址连接(sin_fimaly = AF_UNSPEC)
+
+        
+        listen()        告诉内核 愿意接收连接请求， 当listen() 被调用后， 不管 accept(),  客户端都可以发出连接请求
+                        第二个参数为 未完成连接请求数量， 最大为 128， 
+
+        accept()        处理连接请求
+                        非阻塞的情况下： 返回 -1 且 errno = EAGAIN 或是 EWOULDBLOCK
+
+6. 数据传输
+
+        套接字可以像文件一样， 使用  read() write() 对套接字进行读写。 但是其作用受限。
+
+        send()                          //数据send 成功不能保证数据发送到指定的 另一端进程，只能保证数据发送到 网络驱动程序上。
+        sento()                         // 如果发送的数据是报文，单个数据报文的长度超过 协议的最大长度，则会  返回 -1 且 errno = EMSGSIZE
+        sendmsg()  与 writev()相似       // 如果是字节流， 则会阻塞到发送完整个数据才会返回。
+
+        recv()                          // MSG_PEEK     不取走数据
+        recvfrom()                      // 返回值为  0 表示对方已经关闭发送端
+        recvmsg()
+
+7. 套接字选项
+
+        setsockopt();
+        getsockopt();
+                                        第二个参数为  SOL_SOCKET 表示设置套接字通用行为  
+                                        第三个参数   常用的为 SO_ERROR(获取套接字错误)， SO_REVTIMEO(接收超时时间), SO_SNDTIMEO(发送超时时间)
+
+        fcntl()         使用 F_GETFL  F_SETFL 设置 socket 描述符为非阻塞， O_NONBLOCK
+
+
+十四、UNIX域 套接字
+
+        ipc 通信是不能使用  select()  epoll() 监听检测，所以使用 unix 在进程见通信会更好
+
+        unix 套接字 和 管道的区别在于 管道是单向性， unix 套接字是双向性
+
+1. 无名 unix 套接字
+
+        socketpair()
+
+2. 有名套接字
+        socket()
+        bind()          //这里绑定的结构体为  sockaddr_un ,  这时会在指定路径产生一个文件名，用来进行 unix 套接字通信
+
+3. unix 套接字 可以用来当作服务器， 
+        socket()                为 字节流时，才能 调用 listen(), 报文格式不能 进行 listen()

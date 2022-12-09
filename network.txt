@@ -1,0 +1,194 @@
+计算机网络体系结构一般有三种： OSI其层模型，TCP/IP四层模型， 五层结构
+TCP/IP四层模型：  应用层，传输曾，网际层，网络接口层
+五层结构：        应用曾，传输层，网络层，数据链路层，物理层 
+
+
+tcp提供面向连接的服务，在传送数据前必须建立连接，tcp是通过三次握手进行建立
+
+客户端的状态有：  close     sys_sent    established     fin_wait1       fin_wait2   time_wait   close
+服务器端状态有：  close     listen      sys_recvd       established     close_wait  last_ack    close
+
+服务器端在进入 listen状态会 建立两个内核队列
+    半连接队列（syn队列）： 服务器收到客户端的连接申请，等待客户端回复第三次连接
+    全队列连接(accept队列)： 三次握手成功
+
+syn flood 是客户端伪造ip地址，对服务器进行第一次握手，不回复第三次握手
+            造成 服务器半队列满，无法对正确的ip进行第一次握手
+syn cookie:  根据一定的算法计算客户端的ip和端口号得出 seq 序列号，不进行资源分配处理。
+            等到第三次握手根据客户端返回的seq 算出ip和端口号是否一致，才进行资源分配
+
+syn Proxy防火前： 防火强对客户端进行第一次握手的处理，等到第三次握手数据过来，在统一和服务器进行三次连接
+
+四次挥手：
+主动断开连接方： established    fin_wait1   fin_wait2   time_wait   close
+被动断开连接方： established    close_wait  last_wait   close
+
+close_wait: 为了保证数据在链路上传输完成。
+
+time_wait:状态是为了保证最后的应答能够发送到服务器，假设在 2MSL里，服务器没有收到应答，服务器就会重新发送关闭请求，
+            客户端收到会从新发送，且重新刷新 2MSL时间。
+            且防止就连接的数据包被新连接接收。
+
+MSL：报文最大的生存周期。它是任何报文在网络上存在的最长时间，超过这个时间的报文会被丢弃。
+2MSL：表示可能发送方会发送一条数据在数据链路中，所以要等待接收。
+
+tcp 有一个 保活计时器（ keepalive timer):避免设备出现故障，导致不能正确的进行四次挥手。
+        通常2小时内没有收到数据，会发送探测报文，之后每隔75s再次进发送探测报文，连续10次接收不到会关闭连接。
+
+当服务器出现大量的 time_wait 时表示服务器主动断开tcp连接，需要进行端口服用
+    端口复用有四种情况：
+        1.当一个tcp连接处于time_wait 状态，使用 SO_REUSEADDR, 则会使用该端口进行连接。
+        2.允许多个服务器(多进程)绑定同一个端口，但是与之对用的ip不能相同。
+        3.在udp协议中，可以使用相同地址和端口重复绑定
+
+
+
+
+
+
+http 协议
+
+请求行  请求头  消息体
+响应行  响应头  消息体
+
+
+GET / HTTP/1.1          请求头--->  请求方法 请求路径 协议版本
+host:www.baidu.com      请求头--->  key:value  
+                        
+                        消息体--->  数据        (可以为空，但是有数据时必须空一行)
+
+
+HTTP/1.0 200 OK         响应行--->  协议版本  状态码 状态描述       (200 成功，  3XX 重定向，  4XX 客户端错误，  5XX 服务端错误)
+Pragma: no-cache        响应头 
+Content-Type: text/html
+Content-Length: 12345
+Connection: close
+
+xxxx                    消息体
+
+
+
+
+http特性：
+    1.灵活性：  对数据格式不进行约定，可以通过 Content-Type: value 进行设置
+    2.无连接：  http虽然是使用 tcp 进行通信，但是 每次进行请求和响应，则该通信则会结束，及会断开 tcp 连接。 可以使用 Connection: keep-alive 或是 close 来确保这次的 tcp 连接 是否要断开连接
+    3.无状态：  http 对响应的状态不会进行 存储， 可以同过 Cookie 和 Session 进行设置
+
+
+http 报头分为  通用报头， 请求报头， 响应报头， 实体报头
+
+常用报头：
+
+请求报头：
+    Host: 192.168.1.123:8099                        //请求 的 服务器主机
+    Accept: */*, text/html, image/jpeg              //用户代理可处理的媒体类型
+    Accept-Language: zh-cn,zh;q=0.7, en-us,en;q=0.3 //客户端支持的语言
+    Accept-Encoding: gzip, deflate                  //解码能力，支持压缩方法
+    Authorization: Web认证信息                       // 用户密码登陆信息
+    Referer: www.wyze.com                           //请求中 URI 的原始获取方法
+    User-Agent:                                     //HTTP客户端(代理人)的信息，对浏览器做出兼容
+
+通用报头：
+    Cache-Control: no-cache                         //控制缓存的行为
+    Connection: Keep-Alive                          //是否进行长连接
+    Date:                                           //创建报文的时间
+
+实体报头：
+    Allow: GET, POST, PUT, HEAD, DELETE, CONNECT, TRACE     //资源可支持的HTTP 方法
+    Content-Encoding:                               //消息体使用的编码方式
+    Content-Language:                               //消息体的自然语言
+    Content-Length: 1234                            //消息体的长度， 单位字节
+    Content-Type:                                   // 消息体的内体类型
+
+响应报头：
+    Server:                                         //http 服务器的安装信息
+    WWW-Authenticate:                               //服务器对客户端的认证信息    
+
+
+
+HTTP的请求方法：
+    GET：       默认的访问方法，GET可以在URL中携带数据，使用 ? 分开是资源路径还是数据， 使用 & 来表示下一个数据
+    POST：      携带消息体
+    PUT：       携带消息体，修改数据(一般由POST取代)
+    HEAD：      之返回消息头，一般用来测试连接是否有效
+    DELETE：    删除数据(一般支持)
+    CONNECT：   用在代理服务器
+    TRACE：     (一把不支持)
+    OPTIONS:    请求服务器返回支持的HTTP方法
+
+HTTP常用状态码：
+    200     OK                  请求已成功，请求所希望的响应头或数据体随此响应返回
+    202     Accepted            已接受，已经接受请求，但未处理完成
+    206     Partical Content    部分内容，服务器成功处理部分GET请求
+
+    301     Moned Permanently   永久移动，请求的资源已被永久的移动到新URI，返回信息会包括新的URI，浏览器会自动定向到新URI。今后任何新的请求都应使用新的URI代替
+    302     Found(意外的)        临时移动，与301类似。但资源只是被临时移动，客户端应继续使用原有URI
+
+    400     Bad Request         客户端请求的语法错误，服务器无法理解
+    401     Unauthorized        请求用户的身份认证
+    403     Foridden            服务器理解客户端的请求，但是拒绝执行此请求
+    404     Not Found           服务器无法根据客户端的请求找到资源(网页)
+
+    500     Internal Server Error 服务器内部错误，无法完成请求
+    502     Bad Gateway         充当网管或代理的服务器，从远端服务器接收到一个无效的请求
+
+
+无状态处理：
+    客户端： Cookie         客户端首次连接，服务器检测到没有Cookie,或是没有对应的Cookie,则会创建一个Cookie，在响应数据中 通过 Cookie: value 数据报文头返回
+    服务端： Session 
+
+
+http 的认证方式：
+    BASIC认证(明文请求，不安全)：     首次请求http时，服务器会返回401 表示客户端需要进行身份认证，
+                                    客户端将用户名和密码填入 Authorization: value(进行basic64 把用户名和密码进行转换) 字段，再次进行请求。
+
+                                Authorization: Basic YWRtaW46MTIzNDU2 
+                                                    其中 YWRtaW46MTIzNDU2 = base64(username:password);
+
+
+    DIDEST认证(密码进行MD5，防止密码被窃取，但是不能防止被截获或是假冒)
+                                Authorization: Digest username="admin",realm="TVT API Test Tool",nonce="d4f95e85dc5a39a4914db61b67878f5b",
+                                                uri="GetDeviceInfo",algorithm="MD5",cnonce="d4f95e85dc5a39a4914db61b67878f5b",nc=00000001,
+                                                qop="auth",response="1cc4cf126d3c4a70d2de34c5d8c2943c"
+                                        username:   用户名
+                                        realm:      系统发过来的领域
+                                        nonce:      服务器端通过 WWW-Authenticate 返回的随机数
+                                        uri:        访问的资源路径
+                                        algorithm:  加密算法
+                                        cnonce:     客户端的随即数
+                                        cn:         表示客户端的请求次数
+                                        qop:        限定response的计算方法
+                                        response:   计算出来的摘要，前面各字段除algorithm外全要参与该值的计算
+
+                                        # HA1部分
+                                        # 当algorithm值为"MD5"或未指定时，HA1计算方法如下
+                                        HA1 = MD5(username:realm:password)
+                                        # 当algorithm值为"MD5-sess"时，HA1计算方法如下
+                                        HA1 = MD5(MD5(username:realm:password):nonce:cnonce)
+
+                                        # HA2部分
+                                        # 当qop值为"auth"或未指定时，HA2计算方法如下
+                                        HA2 = MD5(method:uri)
+                                        # 当qop值为"auth-int"时，HA2计算方法如下；entityBody是指整个body（？）
+                                        HA2 = MD5(method:uri:MD5(entityBody))
+
+                                        # response部分
+                                        # 当qop值为"auth"或"auth-int"时，response计算方法如下
+                                        response = MD5(HA1:nonce:nonceCount:cnonce:qop:HA2)
+                                        # 当qop未指定时，response计算方法如下
+                                        response = MD5(HA1:nonce:HA2) 
+
+                                        
+
+uri:  http://www.baidu.com:80/page/xxx?id=10&v=20#fr
+
+    http                协议 
+    www.baidu.com       host
+    80                  端口
+    /page/xxx           资源路径
+    id=10&v=20          param
+    fr                  fragment
+
+30
+
+
